@@ -1,0 +1,10 @@
+functionObject/anariVis.C
+functionObject/anariVisSettingsIO.C
+functionObject/anariVisVolumeSampler.C
+transport/anariVisTransport.C
+render/anariVisPacket.C
+render/anariVisScene.C
+render/anariVisRenderer.C
+render/anariVisImage.C
+
+LIB = $(ANARIVIS_LIBBIN)/libanariVis

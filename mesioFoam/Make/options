@@ -1,0 +1,23 @@
+/*
+ * Mesio in-situ API version 2 (mesio_insitu.h, ESPRESO/Mesio) built with the
+ * same foss/2025b toolchain and --intwidth=32 (matches WM_LABEL_SIZE=32).
+ * MESIO_ROOT and OPENVDB_ROOT are exported by scripts/env_mesio_openfoam.sh
+ * (MESIO_VARIANT selects the Mesio install, e.g. next -> install/mesio-next).
+ */
+
+include $(GENERAL_RULES)/mpi-rules
+
+EXE_INC = \
+    $(PFLAGS) $(PINC) \
+    -I$(LIB_SRC)/finiteVolume/lnInclude \
+    -I$(LIB_SRC)/meshTools/lnInclude \
+    -I$(MESIO_ROOT)/include \
+    -DMESIO_INT_WIDTH=32
+
+LIB_LIBS = \
+    -lfiniteVolume \
+    -lmeshTools \
+    -L$(MESIO_ROOT)/lib64 -Wl,-rpath,$(MESIO_ROOT)/lib64 \
+    -Wl,-rpath,$(OPENVDB_ROOT)/lib -Wl,-rpath-link,$(OPENVDB_ROOT)/lib \
+    -lmesioapi \
+    $(PLIBS)

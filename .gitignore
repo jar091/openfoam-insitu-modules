@@ -1,0 +1,6 @@
+lnInclude/
+Make/*/
+*.o
+*.so
+*.dep
+log.*

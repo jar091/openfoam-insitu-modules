@@ -1,0 +1,23 @@
+#!/bin/sh
+# Build the anariVis function object library and the anariVisRender
+# application with wmake.
+#
+#   source scripts/env_anari_openfoam.sh   (OpenFOAM + ANARI environment)
+#   ./Allwmake [-j N]
+#
+# Output (ANARIVIS_LIBBIN / ANARIVIS_BINDIR, set by the env script):
+#   install/openfoam-modules/$WM_OPTIONS/lib/libanariVis.so
+#   install/openfoam-modules/$WM_OPTIONS/bin/anariVisRender
+cd "${0%/*}" || exit 1
+
+if [ -z "$WM_PROJECT_DIR" ] || [ -z "$ANARI_ROOT" ] || [ -z "$DEEPCOMP_ROOT" ] \
+   || [ -z "$ANARIVIS_LIBBIN" ] || [ -z "$ANARIVIS_BINDIR" ]
+then
+    echo "Source scripts/env_anari_openfoam.sh first" 1>&2
+    exit 1
+fi
+
+mkdir -p "$ANARIVIS_LIBBIN" "$ANARIVIS_BINDIR"
+
+wmake "$@" libso . || exit 1
+wmake "$@" applications/anariVisRender || exit 1

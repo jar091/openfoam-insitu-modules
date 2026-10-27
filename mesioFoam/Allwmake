@@ -1,0 +1,28 @@
+#!/bin/sh
+cd "${0%/*}" || exit                            # Run from this directory
+#------------------------------------------------------------------------------
+# Build libmesioFoam (mesioVDB function object) into $FOAM_USER_LIBBIN.
+# Requires the OpenFOAM environment and MESIO_ROOT / OPENVDB_ROOT
+# (source scripts/env_mesio_openfoam.sh).
+
+if [ -z "$WM_PROJECT_DIR" ]
+then
+    echo "Error: OpenFOAM environment not set" 1>&2
+    exit 1
+fi
+
+if [ ! -f "$MESIO_ROOT/include/mesio_insitu.h" ]
+then
+    echo "Error: MESIO_ROOT=$MESIO_ROOT has no include/mesio_insitu.h" 1>&2
+    exit 1
+fi
+
+if [ ! -d "$OPENVDB_ROOT/lib" ]
+then
+    echo "Error: OPENVDB_ROOT=$OPENVDB_ROOT has no lib directory" 1>&2
+    exit 1
+fi
+
+wmake "$@" libso .                              # options (e.g. -build-root=) first
+
+#------------------------------------------------------------------------------
