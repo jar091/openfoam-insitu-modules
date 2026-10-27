@@ -72,6 +72,7 @@ Usage
 #endif
 
 #include <chrono>
+#include <cstdlib>
 
 using namespace Foam;
 
@@ -148,7 +149,12 @@ int main(int argc, char *argv[])
     ::anariVis::RenderSettings settings =
         anariVisIO::readSettings(dict, ".", "anariVis");
 
-    ::anariVis::widenAffinity();
+    // all cores of the node, unless the launcher placed the rank next to its
+    // GPU (ANARIVIS_KEEP_AFFINITY)
+    if (!std::getenv("ANARIVIS_KEEP_AFFINITY"))
+    {
+        ::anariVis::widenAffinity();
+    }
 
     if (args.found("threads"))
     {

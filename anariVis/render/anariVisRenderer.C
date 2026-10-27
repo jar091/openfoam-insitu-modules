@@ -344,6 +344,29 @@ anariVis::Renderer::Renderer
         );
         libName_ = "ptc(" + wrapped + ")";
     }
+
+    // GPU devices (Barney OptiX/CUDA, VisRTX): one GPU per render rank of a
+    // node, all GPUs stay visible (CUDA IPC / NVLink between the ranks);
+    // ANARIVIS_CUDA_DEVICE overrides the node-local rank
+    if (libName_ == "barney" || libName_ == "visrtx")
+    {
+        MPI_Comm node;
+        MPI_Comm_split_type
+        (
+            comm_, MPI_COMM_TYPE_SHARED, rank_, MPI_INFO_NULL, &node
+        );
+        int cudaDevice = 0;
+        MPI_Comm_rank(node, &cudaDevice);
+        MPI_Comm_free(&node);
+        if (const char* e = std::getenv("ANARIVIS_CUDA_DEVICE"))
+        {
+            cudaDevice = std::atoi(e);
+        }
+        anariSetParameter
+        (
+            device_, device_, "cudaDevice", ANARI_INT32, &cudaDevice
+        );
+    }
     anariCommitParameters(device_, device_);
 
     // Renderer
