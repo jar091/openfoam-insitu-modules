@@ -45,6 +45,27 @@ namespace
 
 // * * * * * * * * * * * * * * * Global Functions  * * * * * * * * * * * * * //
 
+std::string Foam::anariVisIO::colourMapName
+(
+    const dictionary& dict,
+    const word& key,
+    const word& defaultName
+)
+{
+    if (!dict.found(key))
+    {
+        return defaultName;
+    }
+    ITstream& is = dict.lookup(key);
+    if (is.peek().isWord())
+    {
+        const word name(is);
+        return name == "gray" ? std::string("grey") : std::string(name);
+    }
+    return std::string();
+}
+
+
 std::vector<::anariVis::ColourPoint> Foam::anariVisIO::readColourMap
 (
     const dictionary& dict,
@@ -178,6 +199,11 @@ std::vector<::anariVis::ColourPoint> Foam::anariVisIO::readColourMap
             ::anariVis::SurfaceStyle st;
             st.name = e.keyword();
             st.useField = sd.found("colourField");
+            if (st.useField)
+            {
+                st.field = sd.get<word>("colourField");
+            }
+            st.colourMapName = colourMapName(sd, "colourMap", "coolToWarm");
             vector v;
             if (sd.readIfPresent("colour", v)) st.colour = toVec3f(v);
             st.colourMap = readColourMap(sd, "colourMap", "coolToWarm");
@@ -205,7 +231,9 @@ std::vector<::anariVis::ColourPoint> Foam::anariVisIO::readColourMap
             const dictionary& vd = e.dict();
             ::anariVis::VolumeStyle st;
             st.name = e.keyword();
+            st.field = vd.getOrDefault<word>("field", word::null);
             st.colourMap = readColourMap(vd, "colourMap", "coolToWarm");
+            st.colourMapName = colourMapName(vd, "colourMap", "coolToWarm");
             if (vd.found("opacity"))
             {
                 const List<FixedList<scalar, 2>> op

@@ -97,6 +97,14 @@ namespace anariVisIO
     const word& defaultPrefix
 );
 
+//- Name of a colour map entry ("" for a list of control points)
+std::string colourMapName
+(
+    const dictionary& dict,
+    const word& key,
+    const word& defaultName
+);
+
 //- Read a colour map entry (name or list of (x r g b))
 std::vector<::anariVis::ColourPoint> readColourMap
 (

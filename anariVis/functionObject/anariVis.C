@@ -257,6 +257,31 @@ void Foam::functionObjects::anariVis::initialise()
             new ::anariVis::Renderer(settings_, transport_->renderComm())
         );
 
+        #ifdef ANARIVIS_NEXARIS
+        if (viewerEnabled_)
+        {
+            if (viewerOptions_.title.empty())
+            {
+                viewerOptions_.title =
+                    std::string(time_.globalCaseName()) + " (in-situ, "
+                  + std::to_string(UPstream::nProcs()) + " ranks, "
+                  + std::to_string(nConsumers) + " render ranks)";
+            }
+            viewer_.reset
+            (
+                new ::anariVis::LiveViewer
+                (
+                    *renderer_, settings_, transport_->renderComm(),
+                    viewerOptions_
+                )
+            );
+            if (!viewer_->ok())
+            {
+                viewer_.reset(nullptr);
+            }
+        }
+        #endif
+
         if (renderer_->rank() == 0)
         {
             int provided = 0;
@@ -473,6 +498,7 @@ Foam::functionObjects::anariVis::anariVis
     volumes_(),
     transport_(nullptr),
     renderer_(nullptr),
+    viewerEnabled_(false),
     destinations_(),
     bounds_(),
     initialised_(false),
@@ -502,6 +528,9 @@ Foam::functionObjects::anariVis::~anariVis()
         sendStop();
     }
 
+    #ifdef ANARIVIS_NEXARIS
+    viewer_.reset(nullptr);
+    #endif
     renderer_.reset(nullptr);
     transport_.reset(nullptr);
 
@@ -549,6 +578,48 @@ bool Foam::functionObjects::anariVis::read(const dictionary& dict)
         time_.globalPath()/functionObject::outputPrefix/name(),
         name()
     );
+
+    // Interactive viewing in-situ (in-transit: anariVisRender -viewer)
+    viewerEnabled_ = false;
+    if (const dictionary* vd = dict.findDict("viewer"))
+    {
+        viewerEnabled_ = vd->getOrDefault<bool>("enabled", true);
+        if (viewerEnabled_ && mode_ != "inSitu")
+        {
+            Info<< type() << ' ' << name() << ": the viewer dictionary"
+                << " applies in-situ; in-transit use anariVisRender -viewer"
+                << endl;
+            viewerEnabled_ = false;
+        }
+        #ifdef ANARIVIS_NEXARIS
+        if (viewerEnabled_)
+        {
+            ::anariVis::ViewerOptions& o = viewerOptions_;
+            o.inSitu = true;
+            o.port = vd->getOrDefault<label>("port", 47800);
+            o.historySize = vd->getOrDefault<label>("history", 4);
+            o.historyMB = vd->getOrDefault<scalar>("historyMB", 4096);
+            o.passesPerFrame = vd->getOrDefault<label>("passesPerFrame", 2);
+            o.maxSecondsPerFrame =
+                vd->getOrDefault<scalar>("maxSecondsPerFrame", 2);
+            o.keepAlive = vd->getOrDefault<scalar>("keepAlive", 120);
+            o.pixelSamples = vd->getOrDefault<label>("pixelSamples", 1);
+            o.upAxis =
+                vd->getOrDefault<word>("upAxis", "z") == "y" ? 'y' : 'z';
+            o.title = vd->getOrDefault<string>("title", string::null);
+            // frames stay in memory
+            settings_.writeImages = false;
+        }
+        #else
+        if (viewerEnabled_)
+        {
+            WarningInFunction
+                << "anariVis was built without Nexaris (NEXARIS_LIVE_ROOT):"
+                << " the viewer is ignored" << endl;
+            viewerEnabled_ = false;
+        }
+        #endif
+    }
 
     // Surfaces (sampledSurface selection), same order as the styles
     surfaces_.clear();
@@ -813,7 +884,22 @@ bool Foam::functionObjects::anariVis::execute()
                 transport_->nConsumers(),
                 scene
             );
-            ft = renderer_->render(scene);
+            #ifdef ANARIVIS_NEXARIS
+            if (viewer_)
+            {
+                // the solver waits while the client sees the new frame
+                viewer_->addFrame(std::move(scene), seconds(tr));
+                viewer_->runInSituFrame();
+                if (viewer_->quit())
+                {
+                    viewer_.reset(nullptr);
+                }
+            }
+            else
+            #endif
+            {
+                ft = renderer_->render(scene);
+            }
         }
         tRender = seconds(tr);
     }
@@ -865,6 +951,21 @@ bool Foam::functionObjects::anariVis::write()
 bool Foam::functionObjects::anariVis::end()
 {
     sendStop();
+
+    #ifdef ANARIVIS_NEXARIS
+    if (viewer_)
+    {
+        // the run is over: the client can still browse the frames in memory
+        viewer_->setSolverFinished();
+        viewer_->serveUntilQuit();
+        viewer_.reset(nullptr);
+    }
+    if (initialised_ && mode_ == "inSitu" && viewerEnabled_)
+    {
+        // the other ranks wait without spinning
+        transport_->sleepBarrier();
+    }
+    #endif
 
     if (nFrames_)
     {

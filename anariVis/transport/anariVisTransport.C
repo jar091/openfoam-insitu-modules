@@ -376,6 +376,68 @@ bool anariVis::Transport::receiveFrame
 }
 
 
+bool anariVis::Transport::pollFrame(int& frameIndex)
+{
+    while (nStopped_ < nExpected_)
+    {
+        int flag = 0;
+        MPI_Message msg;
+        MPI_Status status;
+        MPI_Improbe(MPI_ANY_SOURCE, tagFrame, visComm_, &flag, &msg, &status);
+        if (!flag)
+        {
+            break;
+        }
+        int n = 0;
+        MPI_Get_count(&status, MPI_BYTE, &n);
+        std::vector<char> buf(static_cast<size_t>(n));
+        MPI_Mrecv(buf.data(), n, MPI_BYTE, &msg, MPI_STATUS_IGNORE);
+
+        FrameHeader h;
+        if (!FramePacket::peekHeader(buf.data(), buf.size(), h))
+        {
+            throw std::runtime_error("anariVis::Transport: corrupt packet");
+        }
+        if (h.flags & FrameHeader::stopFlag)
+        {
+            ++nStopped_;
+        }
+        else
+        {
+            pending_[h.frameIndex].push_back(std::move(buf));
+        }
+    }
+
+    if (!pending_.empty())
+    {
+        auto it = pending_.begin();
+        if (int(it->second.size()) >= nExpected_)
+        {
+            frameIndex = it->first;
+            return true;
+        }
+    }
+    return false;
+}
+
+
+bool anariVis::Transport::takeFrame
+(
+    int frameIndex,
+    std::vector<std::vector<char>>& packets
+)
+{
+    auto it = pending_.find(frameIndex);
+    if (it == pending_.end() || int(it->second.size()) < nExpected_)
+    {
+        return false;
+    }
+    packets = std::move(it->second);
+    pending_.erase(it);
+    return true;
+}
+
+
 void anariVis::Transport::sleepBarrier(int sleepMicroSeconds)
 {
     MPI_Request req;

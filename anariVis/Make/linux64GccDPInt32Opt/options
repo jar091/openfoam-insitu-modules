@@ -1,0 +1,71 @@
+# 0 "Make/options"
+# 0 "<built-in>"
+# 0 "<command-line>"
+# 8 "<command-line>"
+# 1 "/usr/include/stdc-predef.h" 1 3 4
+
+# 17 "/usr/include/stdc-predef.h" 3 4
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 8 "<command-line>" 2
+# 1 "Make/options"
+include $(GENERAL_RULES)/mpi-rules
+
+
+
+
+ifneq ($(strip $(NEXARIS_LIVE_ROOT)),)
+ NEXARIS_FLAGS = -DANARIVIS_NEXARIS -isystem $(NEXARIS_LIVE_ROOT)/include
+ NEXARIS_LIBS = -L$(NEXARIS_LIVE_ROOT)/lib -Wl,-rpath,$(NEXARIS_LIVE_ROOT)/lib -lnexaris_live
+endif
+
+
+
+
+EXE_INC = $(PFLAGS) $(PINC) $(COMP_OPENMP) $(NEXARIS_FLAGS) -I$(LIB_SRC)/finiteVolume/lnInclude -I$(LIB_SRC)/meshTools/lnInclude -I$(LIB_SRC)/sampling/lnInclude -I$(LIB_SRC)/surfMesh/lnInclude -I$(LIB_SRC)/fileFormats/lnInclude -isystem $(ANARI_ROOT)/include -isystem $(DEEPCOMP_ROOT)/include
+# 23 "Make/options"
+
+LIB_LIBS = -lfiniteVolume -lmeshTools -lsampling -lsurfMesh -lfileFormats -L$(ANARI_ROOT)/lib64 -Wl,-rpath,$(ANARI_ROOT)/lib64 -lanari -L$(DEEPCOMP_ROOT)/lib64 -Wl,-rpath,$(DEEPCOMP_ROOT)/lib64 -ldeepCompositing $(NEXARIS_LIBS) $(PLIBS) $(LINK_OPENMP)
+
+# options

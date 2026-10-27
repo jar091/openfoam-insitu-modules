@@ -249,7 +249,14 @@ anariVis::Renderer::Renderer
     dir_{{0.f, 0.f, -1.f}},
     up_{{0.f, 1.f, 0.f}},
     fovy_(0.6f),
-    aspect_(1.f)
+    aspect_(1.f),
+    iScene_(nullptr),
+    haveState_(false),
+    iWorldDirty_(true),
+    iWorld_(nullptr),
+    iCamValid_(false),
+    iSpp_(-1),
+    iDepthRequested_(false)
 {
     FpeGuard fpeGuard;
     AffinityScope affinity(settings.widenAffinity);
@@ -427,7 +434,7 @@ anariVis::Renderer::Renderer
         compositor_->resize(settings_.width, settings_.height);
     }
 
-    if (!settings_.outputDir.empty() && rank_ == 0)
+    if (settings_.writeImages && !settings_.outputDir.empty() && rank_ == 0)
     {
         std::error_code ec;
         std::filesystem::create_directories(settings_.outputDir, ec);
@@ -446,6 +453,8 @@ anariVis::Renderer::~Renderer()
 
     if (device_)
     {
+        for (auto& l : iCamLights_) anariRelease(device_, l.first);
+        if (iWorld_) anariRelease(device_, iWorld_);
         if (frame_) anariRelease(device_, frame_);
         if (camera_) anariRelease(device_, camera_);
         if (renderer_) anariRelease(device_, renderer_);
@@ -545,7 +554,9 @@ void anariVis::Renderer::setupCamera(const LocalScene& scene)
 ANARIWorld anariVis::Renderer::buildWorld
 (
     const LocalScene& scene,
-    size_t& nTris
+    size_t& nTris,
+    const ViewState* view,
+    std::vector<std::pair<ANARILight, vec3f>>* camLights
 )
 {
     nTris = 0;
@@ -565,6 +576,13 @@ ANARIWorld anariVis::Renderer::buildWorld
         const SurfaceStyle* style =
             (size_t(s.id) < settings_.surfaces.size())
           ? &settings_.surfaces[s.id] : nullptr;
+        const LayerView* lv =
+            (view && size_t(s.id) < view->surfaces.size())
+          ? &view->surfaces[s.id] : nullptr;
+        if (lv && !lv->visible)
+        {
+            continue;
+        }
 
         const size_t nPts = s.nPoints();
         const size_t nTri = s.nTriangles();
@@ -626,18 +644,27 @@ ANARIWorld anariVis::Renderer::buildWorld
         }
 
         const bool byField =
-            style && style->useField && s.scalars.size() == nPts;
-        const float opacity = style ? style->opacity : 1.f;
+            style && style->useField && s.scalars.size() == nPts
+         && !(lv && lv->colourMap == -2);
+        const float opacity =
+            lv ? std::clamp(lv->opacity, 0.f, 1.f)
+               : (style ? style->opacity : 1.f);
 
         if (byField)
         {
-            const float lo = s.range[0];
-            const float d = (s.range[1] > lo) ? (s.range[1] - lo) : 1.f;
+            const vec2f range =
+                (lv && !lv->autoRange) ? lv->range : s.range;
+            const float lo = range[0];
+            const float d = (range[1] > lo) ? (range[1] - lo) : 1.f;
+            const std::vector<ColourPoint>& cmap =
+                (lv && lv->colourMap >= 0)
+              ? namedColourMap(colourMapNames()[lv->colourMap])
+              : style->colourMap;
             std::vector<float> col(4*nPts);
             for (size_t i = 0; i < nPts; ++i)
             {
                 const vec3f c =
-                    evalColourMap(style->colourMap, (s.scalars[i] - lo)/d);
+                    evalColourMap(cmap, (s.scalars[i] - lo)/d);
                 col[4*i] = c[0];
                 col[4*i + 1] = c[1];
                 col[4*i + 2] = c[2];
@@ -688,6 +715,13 @@ ANARIWorld anariVis::Renderer::buildWorld
         const VolumeStyle* style =
             (size_t(vb.id) < settings_.volumes.size())
           ? &settings_.volumes[vb.id] : nullptr;
+        const LayerView* lv =
+            (view && size_t(vb.id) < view->volumes.size())
+          ? &view->volumes[vb.id] : nullptr;
+        if (lv && !lv->visible)
+        {
+            continue;
+        }
 
         const auto n = vb.size();
         ANARISpatialField field =
@@ -723,7 +757,9 @@ ANARIWorld anariVis::Renderer::buildWorld
         std::vector<float> tfColour(3*nTF);
         std::vector<float> tfOpacity(nTF);
         const std::vector<ColourPoint> cmap =
-            style ? style->colourMap : namedColourMap("coolToWarm");
+            (lv && lv->colourMap >= 0)
+          ? namedColourMap(colourMapNames()[lv->colourMap])
+          : (style ? style->colourMap : namedColourMap("coolToWarm"));
         const std::vector<OpacityPoint> omap =
             style ? style->opacityMap : std::vector<OpacityPoint>();
         for (int i = 0; i < nTF; ++i)
@@ -750,6 +786,11 @@ ANARIWorld anariVis::Renderer::buildWorld
         anariRelease(device_, oarr);
 
         float vr[2] = {vb.range[0], vb.range[1]};
+        if (lv && !lv->autoRange)
+        {
+            vr[0] = lv->range[0];
+            vr[1] = lv->range[1];
+        }
         if (!(vr[1] > vr[0]))
         {
             vr[1] = vr[0] + 1.f;
@@ -762,6 +803,11 @@ ANARIWorld anariVis::Renderer::buildWorld
             const auto& b = scene.bounds;
             const float dx = b[3] - b[0], dy = b[4] - b[1], dz = b[5] - b[2];
             unitDistance = 0.02f*std::sqrt(dx*dx + dy*dy + dz*dz);
+        }
+        if (lv)
+        {
+            // density scale: a shorter unit distance is more opaque
+            unitDistance /= std::max(lv->opacity, 1e-3f);
         }
         anariSetParameter(device_, vol, "unitDistance", ANARI_FLOAT32, &unitDistance);
         anariCommitParameters(device_, vol);
@@ -820,6 +866,11 @@ ANARIWorld anariVis::Renderer::buildWorld
             }
             anariCommitParameters(device_, light);
             lights.push_back(light);
+            if (camLights && l.cameraRelative && l.type != "point")
+            {
+                anariRetain(device_, light);
+                camLights->push_back({light, l.direction});
+            }
         }
     }
 
@@ -1084,6 +1135,238 @@ anariVis::FrameTimings anariVis::Renderer::render(const LocalScene& scene)
     }
     t.write = seconds(t3);
 
+    return t;
+}
+
+
+// * * * * * * * * * * * * * * * Interactive viewing * * * * * * * * * * * * //
+
+void anariVis::Renderer::setScene(const LocalScene& scene)
+{
+    iScene_ = &scene;
+    iWorldDirty_ = true;
+}
+
+
+void anariVis::Renderer::setViewState(const ViewState& state)
+{
+    iState_ = state;
+    haveState_ = true;
+    iWorldDirty_ = true;
+}
+
+
+anariVis::ViewCamera anariVis::Renderer::defaultCamera
+(
+    const std::array<float, 6>& b
+) const
+{
+    const CameraSettings& c = settings_.camera;
+    const vec3f lo{{b[0], b[1], b[2]}};
+    const vec3f hi{{b[3], b[4], b[5]}};
+    const vec3f centre
+    {{
+        0.5f*(lo[0] + hi[0]), 0.5f*(lo[1] + hi[1]), 0.5f*(lo[2] + hi[2])
+    }};
+    const vec3f diag = sub(hi, lo);
+    const float radius = std::max(0.5f*std::sqrt(dot(diag, diag)), 1e-12f);
+
+    ViewCamera v;
+    v.width = settings_.width;
+    v.height = settings_.height;
+    v.aspect = float(settings_.width)/float(settings_.height);
+    v.fovy = c.fovy*float(M_PI)/180.f;
+    const vec3f target = c.autoLookAt ? centre : c.lookAt;
+    v.target = target;
+    if (c.autoPosition)
+    {
+        v.dir = normalised(c.viewDirection);
+        const float fovx = 2.f*std::atan(std::tan(0.5f*v.fovy)*v.aspect);
+        const float halfFov = 0.5f*std::min(v.fovy, fovx);
+        const float dist = radius/std::sin(halfFov)/std::max(c.zoom, 1e-3f);
+        v.eye =
+        {{
+            target[0] - v.dir[0]*dist,
+            target[1] - v.dir[1]*dist,
+            target[2] - v.dir[2]*dist
+        }};
+    }
+    else
+    {
+        v.eye = c.position;
+        v.dir = normalised(sub(target, v.eye));
+    }
+    v.up = normalised(c.up);
+    if (std::abs(dot(v.up, v.dir)) > 0.999f)
+    {
+        v.up = std::abs(v.dir[2]) < 0.9f
+            ? vec3f{{0.f, 0.f, 1.f}} : vec3f{{0.f, 1.f, 0.f}};
+    }
+    return v;
+}
+
+
+anariVis::FrameTimings anariVis::Renderer::renderView
+(
+    const ViewCamera& cam,
+    std::vector<uint32_t>& rgba,
+    std::vector<float>& depth
+)
+{
+    FpeGuard fpeGuard;
+    AffinityScope affinity(settings_.widenAffinity);
+
+    FrameTimings t;
+    rgba.clear();
+    depth.clear();
+    if (!iScene_)
+    {
+        return t;
+    }
+
+    auto t0 = clock_type::now();
+
+    bool camChanged = !iCamValid_;
+    if (iWorldDirty_)
+    {
+        for (auto& l : iCamLights_) anariRelease(device_, l.first);
+        iCamLights_.clear();
+        if (iWorld_) anariRelease(device_, iWorld_);
+        iWorld_ = buildWorld
+        (
+            *iScene_, t.nTriangles, haveState_ ? &iState_ : nullptr,
+            &iCamLights_
+        );
+        anariSetParameter(device_, frame_, "world", ANARI_WORLD, &iWorld_);
+        anariCommitParameters(device_, frame_);
+        iWorldDirty_ = false;
+        camChanged = true;
+    }
+
+    const int w = std::max(cam.width, 1);
+    const int h = std::max(cam.height, 1);
+    const bool sizeChanged =
+        !iCamValid_ || w != iCam_.width || h != iCam_.height
+     || !iDepthRequested_;
+    if (sizeChanged)
+    {
+        const uint32_t sz[2] = {uint32_t(w), uint32_t(h)};
+        anariSetParameter(device_, frame_, "size", ANARI_UINT32_VEC2, sz);
+        if (!iDepthRequested_ && mode_ != "deep")
+        {
+            // ray distance per pixel for the client's reprojection
+            const ANARIDataType depthType = ANARI_FLOAT32;
+            anariSetParameter
+            (
+                device_, frame_, "channel.depth", ANARI_DATA_TYPE, &depthType
+            );
+        }
+        iDepthRequested_ = true;
+        anariCommitParameters(device_, frame_);
+        settings_.width = w;
+        settings_.height = h;
+        if (compositor_)
+        {
+            compositor_->resize(w, h);
+        }
+    }
+
+    if
+    (
+        !camChanged
+     && (cam.eye != iCam_.eye || cam.dir != iCam_.dir || cam.up != iCam_.up
+      || cam.fovy != iCam_.fovy || cam.aspect != iCam_.aspect)
+    )
+    {
+        camChanged = true;
+    }
+    if (camChanged)
+    {
+        eye_ = cam.eye;
+        dir_ = normalised(cam.dir);
+        const vec3f right = normalised(cross(dir_, cam.up));
+        up_ = cross(right, dir_);
+        fovy_ = cam.fovy;
+        aspect_ = cam.aspect;
+        anariSetParameter(device_, camera_, "position", ANARI_FLOAT32_VEC3, eye_.data());
+        anariSetParameter(device_, camera_, "direction", ANARI_FLOAT32_VEC3, dir_.data());
+        anariSetParameter(device_, camera_, "up", ANARI_FLOAT32_VEC3, up_.data());
+        anariSetParameter(device_, camera_, "fovy", ANARI_FLOAT32, &fovy_);
+        anariSetParameter(device_, camera_, "aspect", ANARI_FLOAT32, &aspect_);
+        anariCommitParameters(device_, camera_);
+
+        // Lights that follow the camera (the default key light)
+        for (const auto& l : iCamLights_)
+        {
+            const vec3f& c = l.second;
+            const vec3f d = normalised
+            (
+                vec3f
+                {{
+                    c[0]*right[0] + c[1]*up_[0] + c[2]*dir_[0],
+                    c[0]*right[1] + c[1]*up_[1] + c[2]*dir_[1],
+                    c[0]*right[2] + c[1]*up_[2] + c[2]*dir_[2]
+                }}
+            );
+            anariSetParameter(device_, l.first, "direction", ANARI_FLOAT32_VEC3, d.data());
+            anariCommitParameters(device_, l.first);
+        }
+        if (!iCamLights_.empty() && std::getenv("ANARIVIS_LIGHT_WORLD_COMMIT"))
+        {
+            anariCommitParameters(device_, iWorld_);
+        }
+    }
+
+    const int spp = std::max(cam.pixelSamples, 1);
+    if (spp != iSpp_)
+    {
+        anariSetParameter(device_, renderer_, "pixelSamples", ANARI_INT32, &spp);
+        anariCommitParameters(device_, renderer_);
+        iSpp_ = spp;
+    }
+
+    iCam_ = cam;
+    iCam_.width = w;
+    iCam_.height = h;
+    iCamValid_ = true;
+    t.build = seconds(t0);
+
+    auto t1 = clock_type::now();
+    anariRenderFrame(device_, frame_);
+    anariFrameReady(device_, frame_, ANARI_WAIT);
+    t.render = seconds(t1);
+
+    auto t2 = clock_type::now();
+    const size_t nPix = size_t(w)*h;
+    if (mode_ == "deep")
+    {
+        compositeDeep(*iScene_, rgba);
+    }
+    else if (rank_ == 0)
+    {
+        uint32_t mw = 0, mh = 0;
+        ANARIDataType type = ANARI_UNKNOWN;
+        const uint32_t* px = static_cast<const uint32_t*>
+        (
+            anariMapFrame(device_, frame_, "channel.color", &mw, &mh, &type)
+        );
+        if (px && size_t(mw)*mh == nPix)
+        {
+            rgba.assign(px, px + nPix);
+        }
+        if (px) anariUnmapFrame(device_, frame_, "channel.color");
+
+        const float* z = static_cast<const float*>
+        (
+            anariMapFrame(device_, frame_, "channel.depth", &mw, &mh, &type)
+        );
+        if (z && type == ANARI_FLOAT32 && size_t(mw)*mh == nPix)
+        {
+            depth.assign(z, z + nPix);
+        }
+        if (z) anariUnmapFrame(device_, frame_, "channel.depth");
+    }
+    t.composite = seconds(t2);
     return t;
 }
 

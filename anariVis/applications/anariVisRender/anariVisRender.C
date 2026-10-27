@@ -51,6 +51,12 @@ Usage
       - \par -threads \<N\>
         Render threads per render rank (default: cores / render ranks on
         the node)
+      - \par -viewer
+        Interactive viewing with the Nexaris client instead of PNG files
+        (built with NEXARIS_LIVE_ROOT): render rank 0 serves the frames on
+        127.0.0.1:\<port\> (client through an SSH tunnel); the frames
+        stay in memory, nothing is written. Further options -viewerPort,
+        -history, -historyMB, -keepAlive, -upAxis, -viewerSpp
 
 \*---------------------------------------------------------------------------*/
 
@@ -61,6 +67,9 @@ Usage
 #include "anariVisTransport.H"
 #include "anariVisRenderer.H"
 #include "anariVisScene.H"
+#ifdef ANARIVIS_NEXARIS
+#include "anariVisRenderViewer.H"
+#endif
 
 #include <chrono>
 
@@ -83,6 +92,30 @@ int main(int argc, char *argv[])
         "N",
         "Render threads per render rank"
     );
+
+    #ifdef ANARIVIS_NEXARIS
+    argList::addBoolOption
+    (
+        "viewer",
+        "Interactive viewing with the Nexaris client (no image files)"
+    );
+    argList::addOption("viewerPort", "port", "Viewer TCP port (47800)");
+    argList::addOption("history", "N", "Frames kept in memory (16)");
+    argList::addOption("historyMB", "MB", "History memory per rank (16384)");
+    argList::addOption
+    (
+        "keepAlive", "s",
+        "Viewer lifetime after the solver ended without a client (600)"
+    );
+    argList::addOption("upAxis", "y|z", "Up axis of the case (z)");
+    argList::addOption("viewerSpp", "N", "Default samples per pixel (1)");
+    argList::addOption
+    (
+        "viewerMinPasses", "N",
+        "Passes of a frame before a newer one replaces it when following (8)"
+    );
+    argList::addOption("viewerTitle", "text", "Title shown by the client");
+    #endif
 
     argList args(argc, argv);
 
@@ -132,6 +165,15 @@ int main(int argc, char *argv[])
 
     transport.setDestinations(std::vector<int>());
 
+    #ifdef ANARIVIS_NEXARIS
+    const bool viewer = args.found("viewer");
+    if (viewer)
+    {
+        // in-transit viewing: frames stay in memory
+        settings.writeImages = false;
+    }
+    #endif
+
     ::anariVis::Renderer renderer(settings, transport.renderComm());
 
     {
@@ -146,6 +188,31 @@ int main(int argc, char *argv[])
             << ", image " << settings.width << 'x' << settings.height
             << ", output " << settings.outputDir.c_str() << nl << endl;
     }
+
+    #ifdef ANARIVIS_NEXARIS
+    if (viewer)
+    {
+        ::anariVis::ViewerOptions vo;
+        vo.port = args.getOrDefault<label>("viewerPort", 47800);
+        vo.historySize = args.getOrDefault<label>("history", 16);
+        vo.historyMB = args.getOrDefault<scalar>("historyMB", 16384);
+        vo.keepAlive = args.getOrDefault<scalar>("keepAlive", 600);
+        vo.pixelSamples = args.getOrDefault<label>("viewerSpp", 1);
+        vo.minPasses = args.getOrDefault<label>("viewerMinPasses", 8);
+        vo.upAxis = args.getOrDefault<word>("upAxis", "z") == "y" ? 'y' : 'z';
+        std::string title = args.globalCaseName();
+        title +=
+            " (in-transit, " + std::to_string(transport.nProducers())
+          + " solver ranks)";
+        vo.title =
+            args.found("viewerTitle")
+          ? std::string(args.get<string>("viewerTitle")) : title;
+        const long n = ::anariVis::runViewer(transport, renderer, settings, vo);
+        Info<< "anariVisRender: viewer finished, " << label(n)
+            << " frames received" << nl << "End" << nl << endl;
+        return n < 0 ? 1 : 0;
+    }
+    #endif
 
     std::vector<std::vector<char>> packets;
     int frameIndex = 0;

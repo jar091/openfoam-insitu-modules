@@ -144,11 +144,35 @@ Usage
         dropPolicy   | inTransit: drop or block             | no  | drop
         interpolationScheme | point interpolation of colour fields | no | cellPoint
         surfaceRouting | node (to a render rank on the same node / block mapping) or spatial (triangles to the convex brick of a render rank, exact sort-last ordering) | no | auto (spatial for deep/ptc)
+        viewer       | inSitu: interactive viewing with the Nexaris client instead of images (see below) | no |
         surfaces     | sampledSurface dictionaries + style  | no  |
         volumes      | volume dictionaries                  | no  |
     \endtable
 
     Render settings: see Foam::anariVisIO.
+
+    In-situ interactive viewing (build with NEXARIS_LIVE_ROOT; Nexaris
+    docs/INSITU.md): render rank 0 serves the frames to the Nexaris client
+    (127.0.0.1:port, SSH tunnel), no images are written. At every render
+    step the solver waits while the new frame is rendered for the client
+    (passesPerFrame passes, at most maxSecondsPerFrame, nothing without a
+    client) and as long as the client pauses the simulation. In-transit use
+    anariVisRender -viewer instead.
+    \verbatim
+    viewer
+    {
+        enabled             true;
+        port                47800;
+        history             4;      // frames kept in memory (render ranks)
+        historyMB           4096;   // per render rank
+        passesPerFrame      2;
+        maxSecondsPerFrame  2;
+        keepAlive           120;    // after the run, until no client [s]
+        upAxis              z;      // y | z
+        pixelSamples        1;
+        title               "...";  // default: case (in-situ, N ranks)
+    }
+    \endverbatim
 
 Note
     The mesh is assumed static (volume sampling weights and routing are
@@ -167,6 +191,7 @@ SourceFiles
 #include "PtrList.H"
 #include "anariVisVolumeSampler.H"
 #include "anariVisTypes.H"
+#include "anariVisLiveViewer.H"
 
 #include <memory>
 
@@ -242,6 +267,16 @@ class anariVis
 
         //- Renderer (inSitu render ranks only)
         std::unique_ptr<::anariVis::Renderer> renderer_;
+
+        //- inSitu: interactive viewing (viewer dictionary)
+        bool viewerEnabled_;
+
+        #ifdef ANARIVIS_NEXARIS
+        ::anariVis::ViewerOptions viewerOptions_;
+
+        //- Viewer on the render ranks
+        std::unique_ptr<::anariVis::LiveViewer> viewer_;
+        #endif
 
         //- Consumers this producer sends to every frame
         std::vector<int> destinations_;

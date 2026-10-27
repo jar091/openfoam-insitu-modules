@@ -82,6 +82,9 @@ struct SurfaceStyle
 {
     std::string name;
 
+    //- Name of the colour field (informational, "" = uniform colour)
+    std::string field;
+
     //- Colour by a scalar field (else uniform colour)
     bool useField = false;
 
@@ -90,6 +93,9 @@ struct SurfaceStyle
 
     //- Colour map control points (if useField)
     std::vector<ColourPoint> colourMap;
+
+    //- Name of the colour map ("" = explicit control points)
+    std::string colourMapName;
 
     //- Use the global min/max of the colour field as range
     bool autoRange = true;
@@ -110,7 +116,13 @@ struct VolumeStyle
 {
     std::string name;
 
+    //- Sampled field (informational)
+    std::string field;
+
     std::vector<ColourPoint> colourMap;
+
+    //- Name of the colour map ("" = explicit control points)
+    std::string colourMapName;
 
     std::vector<OpacityPoint> opacityMap;
 
@@ -403,6 +415,9 @@ void splitByBrick
 
 //- Colour map by name (coolToWarm, viridis, inferno, jet, grey, blueWhiteRed)
 std::vector<ColourPoint> namedColourMap(const std::string& name);
+
+//- The names namedColourMap() knows, in a fixed order
+const std::vector<std::string>& colourMapNames();
 
 //- Evaluate a colour map at x in [0,1]
 vec3f evalColourMap(const std::vector<ColourPoint>& map, float x);

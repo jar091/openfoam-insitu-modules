@@ -6,5 +6,6 @@ render/anariVisPacket.C
 render/anariVisScene.C
 render/anariVisRenderer.C
 render/anariVisImage.C
+render/anariVisLiveViewer.C
 
 LIB = $(ANARIVIS_LIBBIN)/libanariVis

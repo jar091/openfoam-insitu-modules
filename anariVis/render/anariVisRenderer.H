@@ -118,6 +118,45 @@ struct LocalScene
 };
 
 
+//- Interactive viewing: how the user shows one layer (surface or volume)
+struct LayerView
+{
+    bool visible = true;
+    //- Surface: opacity [0,1]; volume: density scale (1 = as configured)
+    float opacity = 1.f;
+    //- Index into colourMapNames(); -1 = the configured map; -2 = uniform
+    //  colour (surfaces)
+    int colourMap = -1;
+    bool autoRange = true;
+    vec2f range{{0.f, 1.f}};
+};
+
+
+//- Interactive viewing: the user's settings of all layers
+struct ViewState
+{
+    std::vector<LayerView> surfaces;
+    std::vector<LayerView> volumes;
+};
+
+
+//- Interactive viewing: one camera (simulation coordinates)
+struct ViewCamera
+{
+    vec3f eye{{0.f, 0.f, 1.f}};
+    vec3f dir{{0.f, 0.f, -1.f}};
+    vec3f up{{0.f, 1.f, 0.f}};
+    //- Look-at point (defaultCamera only)
+    vec3f target{{0.f, 0.f, 0.f}};
+    //- Vertical field of view [rad]
+    float fovy = 0.6f;
+    float aspect = 1.f;
+    int width = 640;
+    int height = 480;
+    int pixelSamples = 1;
+};
+
+
 //- Timings of one frame [s]
 struct FrameTimings
 {
@@ -164,12 +203,46 @@ class Renderer
         float fovy_;
         float aspect_;
 
+        // Interactive viewing (setScene / setViewState / renderView)
+
+            //- Scene of the interactive world (not owned)
+            const LocalScene* iScene_;
+
+            ViewState iState_;
+            bool haveState_;
+
+            //- World must be rebuilt before the next renderView
+            bool iWorldDirty_;
+
+            ANARIWorld iWorld_;
+
+            //- Lights of iWorld_ that follow the camera, with their
+            //  camera-space direction
+            std::vector<std::pair<ANARILight, vec3f>> iCamLights_;
+
+            //- Last committed camera / frame size / samples
+            ViewCamera iCam_;
+            bool iCamValid_;
+            int iSpp_;
+
+            //- channel.depth was added to the frame
+            bool iDepthRequested_;
+
 
     // Private Member Functions
 
         void setupCamera(const LocalScene& scene);
 
-        ANARIWorld buildWorld(const LocalScene& scene, size_t& nTris);
+        //- Build the ANARI world; with a view state its layer settings
+        //  replace the configured style, with camLights the lights that
+        //  follow the camera are kept (referenced) in it
+        ANARIWorld buildWorld
+        (
+            const LocalScene& scene,
+            size_t& nTris,
+            const ViewState* view = nullptr,
+            std::vector<std::pair<ANARILight, vec3f>>* camLights = nullptr
+        );
 
         ANARIArray1D newArray1D
         (
@@ -218,6 +291,34 @@ public:
         //- Render one frame. Collective over the render communicator.
         //  The image is written by render rank 0.
         FrameTimings render(const LocalScene& scene);
+
+
+        // Interactive viewing (anariVisRender with the Nexaris viewer).
+        // All calls are collective over the render communicator and must
+        // get identical arguments on every render rank (except the scene,
+        // which is the rank's own part).
+
+            //- The scene to show; it must stay alive until the next
+            //  setScene (the world is rebuilt at the next renderView)
+            void setScene(const LocalScene& scene);
+
+            //- The user's layer settings
+            void setViewState(const ViewState& state);
+
+            //- Render one accumulation pass of the current scene. Unchanged
+            //  camera, scene and settings refine the previous image.
+            //  Render rank 0 gets the image (RGBA8 sRGB, row 0 = bottom)
+            //  and, where the device delivers it, the ray distance per
+            //  pixel (empty otherwise).
+            FrameTimings renderView
+            (
+                const ViewCamera& cam,
+                std::vector<uint32_t>& rgba,
+                std::vector<float>& depth
+            );
+
+            //- The camera the configured settings give for these bounds
+            ViewCamera defaultCamera(const std::array<float, 6>& bounds) const;
 };
 
 

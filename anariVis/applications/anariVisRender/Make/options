@@ -1,7 +1,14 @@
 include $(GENERAL_RULES)/mpi-rules
 
+/* NEXARIS_LIVE_ROOT (optional): install prefix of the Nexaris nexaris_live
+   library; enables the interactive viewer (-viewer) */
+ifneq ($(strip $(NEXARIS_LIVE_ROOT)),)
+    NEXARIS_FLAGS = -DANARIVIS_NEXARIS -isystem $(NEXARIS_LIVE_ROOT)/include
+    NEXARIS_LIBS = -L$(NEXARIS_LIVE_ROOT)/lib -Wl,-rpath,$(NEXARIS_LIVE_ROOT)/lib -lnexaris_live
+endif
+
 EXE_INC = \
-    $(PFLAGS) $(PINC) \
+    $(PFLAGS) $(PINC) $(NEXARIS_FLAGS) \
     -I../../lnInclude \
     -I$(LIB_SRC)/finiteVolume/lnInclude \
     -I$(LIB_SRC)/meshTools/lnInclude \
@@ -17,4 +24,5 @@ EXE_LIBS = \
     -lmeshTools \
     -lsampling \
     -L$(ANARI_ROOT)/lib64 -Wl,-rpath,$(ANARI_ROOT)/lib64 -lanari \
+    $(NEXARIS_LIBS) \
     $(PLIBS)

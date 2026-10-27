@@ -1,10 +1,18 @@
 include $(GENERAL_RULES)/mpi-rules
 
+/* NEXARIS_LIVE_ROOT (optional): install prefix of the Nexaris nexaris_live
+   library; enables the interactive viewer (in-situ viewer dictionary,
+   anariVisRender -viewer) */
+ifneq ($(strip $(NEXARIS_LIVE_ROOT)),)
+    NEXARIS_FLAGS = -DANARIVIS_NEXARIS -isystem $(NEXARIS_LIVE_ROOT)/include
+    NEXARIS_LIBS = -L$(NEXARIS_LIVE_ROOT)/lib -Wl,-rpath,$(NEXARIS_LIVE_ROOT)/lib -lnexaris_live
+endif
+
 /* ANARI_ROOT, DEEPCOMP_ROOT and ANARIVIS_LIBBIN come from
    scripts/env_anari_openfoam.sh (see Allwmake) */
 
 EXE_INC = \
-    $(PFLAGS) $(PINC) $(COMP_OPENMP) \
+    $(PFLAGS) $(PINC) $(COMP_OPENMP) $(NEXARIS_FLAGS) \
     -I$(LIB_SRC)/finiteVolume/lnInclude \
     -I$(LIB_SRC)/meshTools/lnInclude \
     -I$(LIB_SRC)/sampling/lnInclude \
@@ -22,4 +30,5 @@ LIB_LIBS = \
     -L$(ANARI_ROOT)/lib64 -Wl,-rpath,$(ANARI_ROOT)/lib64 -lanari \
     -L$(DEEPCOMP_ROOT)/lib64 -Wl,-rpath,$(DEEPCOMP_ROOT)/lib64 \
     -ldeepCompositing \
+    $(NEXARIS_LIBS) \
     $(PLIBS) $(LINK_OPENMP)

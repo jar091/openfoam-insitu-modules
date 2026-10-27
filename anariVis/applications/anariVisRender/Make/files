@@ -1,3 +1,4 @@
 anariVisRender.C
+anariVisRenderViewer.C
 
 EXE = $(ANARIVIS_BINDIR)/anariVisRender

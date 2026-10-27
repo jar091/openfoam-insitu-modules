@@ -225,6 +225,37 @@ public:
         );
 
 
+        //- Non-blocking: receive all packets that have arrived, then
+        //  report the lowest pending frame index if that frame is complete
+        //  (frameIndex). Does not remove it (see takeFrame).
+        bool pollFrame(int& frameIndex);
+
+        //- Remove the complete frame frameIndex (after pollFrame)
+        bool takeFrame
+        (
+            int frameIndex,
+            std::vector<std::vector<char>>& packets
+        );
+
+        //- All producers have sent their stop packet and no complete
+        //  frame is pending (an incomplete one can no longer complete)
+        bool finished() const
+        {
+            if (nStopped_ < nExpected_)
+            {
+                return false;
+            }
+            for (const auto& p : pending_)
+            {
+                if (int(p.second.size()) >= nExpected_)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+
     // Synchronisation
 
         //- Barrier over visComm that sleeps while waiting, so that waiting

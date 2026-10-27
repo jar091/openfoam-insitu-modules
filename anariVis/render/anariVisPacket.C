@@ -583,6 +583,16 @@ anariVis::namedColourMap(const std::string& name)
 }
 
 
+const std::vector<std::string>& anariVis::colourMapNames()
+{
+    static const std::vector<std::string> names
+    {
+        "coolToWarm", "viridis", "inferno", "jet", "grey", "blueWhiteRed"
+    };
+    return names;
+}
+
+
 anariVis::vec3f anariVis::evalColourMap
 (
     const std::vector<ColourPoint>& map,
